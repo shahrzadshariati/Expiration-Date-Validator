@@ -10,8 +10,9 @@ jobs:
   validation-job:
     runs-on: ubuntu-latest
     env:
-      # These are the values you provided
+      # This URL must exactly match the download link for your asset
       SWIFT_TOOLS_URL: "https://github.com/shahrzadshariati/Expiration-Date-Validator/releases/download/v1.0.0-tools/swift-cli-v0.20.0-x86_64-unknown-linux-musl.tar.gz"
+      # This must be the exact size of the file above in bytes
       EXPECTED_FILE_SIZE: 44397837
 
     steps:
@@ -56,4 +57,47 @@ jobs:
           echo "--- Starting Certificate Analysis ---"
           
           INPUT_FILE="log.rtcm.json"
-          STATUS_FILE="expiration_status.txt
+          STATUS_FILE="expiration_status.txt"
+
+          if [ ! -s "$INPUT_FILE" ]; then
+            echo "Input file '$INPUT_FILE' not found or is empty. Skipping analysis."
+            echo -e "Status: Analysis Skipped\nReason: Input file was missing or empty." > $STATUS_FILE
+            exit 0
+          fi
+
+          EXP_DATE_STRING=$(jq -r 'select(.msg_type == 3081) | .expiration | "\(.year)-\(.month)-\(.day) \(.hours):\(.minutes):\(.seconds)"' $INPUT_FILE | head -n 1)
+
+          if [ -z "$EXP_DATE_STRING" ]; then
+            echo "Message type 3081 not found. Cannot check expiration."
+            echo -e "Status: Analysis Failed\nReason: Message type 3081 not found in log." > $STATUS_FILE
+          else
+            EXP_TIMESTAMP=$(date -d "$EXP_DATE_STRING UTC" +%s)
+            NOW_TIMESTAMP=$(date +%s)
+            
+            if (( EXP_TIMESTAMP < NOW_TIMESTAMP )); then
+              echo -e "Status: EXPIRED\nExpiration Date: $EXP_DATE_STRING UTC" > $STATUS_FILE
+            else
+              DAYS_REMAINING=$(( (EXP_TIMESTAMP - NOW_TIMESTAMP) / 86400 ))
+              if (( DAYS_REMAINING < 30 )); then
+                echo -e "Status: OK (Expiring Soon)\nDays Remaining: $DAYS_REMAINING\nExpiration Date: $EXP_DATE_STRING UTC" > $STATUS_FILE
+              else
+                echo -e "Status: OK\nDays Remaining: $DAYS_REMAINING\nExpiration Date: $EXP_DATE_STRING UTC" > $STATUS_FILE
+              fi
+            fi
+          fi
+          
+          echo ""
+          echo "--- Generated Status Report ---"
+          cat $STATUS_FILE
+
+      - name: Upload NTRIP Log File
+        uses: actions/upload-artifact@v4
+        with:
+          name: ntrip-json-log
+          path: log.rtcm.json
+
+      - name: Upload Expiration Status Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: expiration-status-report
+          path: expiration_status.txt

@@ -64,7 +64,7 @@ jobs:
           cat log.rtcm.json.test || echo "Warning: log.rtcm.json.test could not be read or is empty."
           echo "--- End of log.rtcm.json.test content ---"
 
-      # --- Analyze JSON Log using Shell and jq ---
+      # --- ROBUST ANALYSIS STEP ---
       - name: Analyze Expiration Dates
         run: |
           INPUT_FILE="log.rtcm.json.test"
@@ -72,15 +72,17 @@ jobs:
           
           echo "### Starting JSON analysis using shell script... ###"
 
+          # Check if the input file has content
           if [ ! -s "$INPUT_FILE" ]; then
-            echo "Log file '$INPUT_FILE' is empty or not found. Skipping analysis."
-            echo "Analysis failed: Log file '$INPUT_FILE' is empty or missing." > $OUTPUT_FILE
-            exit 0
+            echo "Analysis failed: Log file '$INPUT_FILE' is empty or not found." > $OUTPUT_FILE
+            exit 0 # Exit gracefully
           fi
 
+          # Get the current time in UTC
           NOW_SECONDS=$(date -u +%s)
           NOW_READABLE=$(date -u)
 
+          # Prepare the output file header
           echo "--- Certificate Expiration Analysis ---" > $OUTPUT_FILE
           echo "Analysis performed at (UTC): $NOW_READABLE" >> $OUTPUT_FILE
           echo "========================================" >> $OUTPUT_FILE
@@ -88,40 +90,39 @@ jobs:
 
           FOUND_COUNT=0
           
-          # This version uses a simpler jq filter that was failing due to JSON formatting,
-          # but the step itself was reached successfully.
-          jq -c '. | select(.sbp.msg_type == 3081 and .sbp.expiration != null)' "$INPUT_FILE" | while read -r line; do
+          # This improved jq command is more efficient and robust. It finds all relevant lines
+          # and extracts the necessary date parts in a single pass.
+          jq -r '
+            select(.sbp.msg_type == 3081 and .sbp.expiration != null) |
+            .sbp.expiration |
+            "\([.year]) \([.month]) \([.day]) \([.hours]) \([.minutes]) \([.seconds])"
+          ' "$INPUT_FILE" | while read -r YEAR MONTH DAY HOURS MINUTES SECONDS; do
             ((FOUND_COUNT++))
             
-            # This method of extracting date parts was fragile.
-            YEAR=$(echo "$line" | jq '.sbp.expiration.year')
-            MONTH=$(echo "$line" | jq '.sbp.expiration.month')
-            DAY=$(echo "$line" | jq '.sbp.expiration.day')
-            HOURS=$(echo "$line" | jq '.sbp.expiration.hours')
-            MINUTES=$(echo "$line" | jq '.sbp.expiration.minutes')
-            SECONDS=$(echo "$line" | jq '.sbp.expiration.seconds')
-            
+            # Construct a date string that 'date' can understand
             EXP_DATE_STRING="$YEAR-$MONTH-$DAY $HOURS:$MINUTES:$SECONDS"
+            
+            # Convert the expiration date to seconds since epoch
             EXP_SECONDS=$(date -u -d "$EXP_DATE_STRING" +%s)
             
+            # Calculate the difference in seconds and convert to days
             DIFF_SECONDS=$((EXP_SECONDS - NOW_SECONDS))
             DAYS_REMAINING=$((DIFF_SECONDS / 86400))
             
+            # Write the required information to the output file
             echo "Found Certificate (Message 3081)" >> $OUTPUT_FILE
-            echo "  - Expiration Date (UTC): $EXP_DATE_STRING" >> $OUTPUT_FILE
+            echo "  1. Expiration Date (UTC): $EXP_DATE_STRING" >> $OUTPUT_FILE
             
             if [ "$DAYS_REMAINING" -ge 0 ]; then
-              echo "  - Status: VALID" >> $OUTPUT_FILE
-              echo "  - Days Remaining: $DAYS_REMAINING" >> $OUTPUT_FILE
+              echo "  2. Days Remaining: $DAYS_REMAINING" >> $OUTPUT_FILE
             else
-              echo "  - Status: EXPIRED" >> $OUTPUT_FILE
-              echo "  - Expired $((DAYS_REMAINING * -1)) days ago." >> $OUTPUT_FILE
+              echo "  - Status: EXPIRED ❌" >> $OUTPUT_FILE
             fi
             echo "" >> $OUTPUT_FILE
           done
           
           if [ "$FOUND_COUNT" -eq 0 ]; then
-            echo "No valid messages with msg_type 3081 and an expiration date were found." >> $OUTPUT_FILE
+            echo "No valid messages with msg_type 3081 and an expiration date were found in the log." >> $OUTPUT_FILE
           fi
           
           echo "### Analysis complete. Found $FOUND_COUNT relevant messages. ###"

@@ -41,7 +41,6 @@ jobs:
           echo "Tools are ready."
 
       # --- THIS IS YOUR ORIGINAL, UNMODIFIED STREAMING STEP ---
-      # Restored the GITHUB_TOKEN to prevent the manual login prompt.
       - name: Run a 10-second Test Stream
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
@@ -56,9 +55,9 @@ jobs:
             --lon 13.096 | swift rtcm32json > log.rtcm.json.test
         continue-on-error: true
 
-      # --- NEW STEP TO DISPLAY THE FILE CONTENT ---
+      # --- STEP TO DISPLAY THE FILE CONTENT ---
       - name: Display Raw Log Content
-        if: always() # Run this even if the streaming step created only a partial file
+        if: always()
         run: |
           echo "--- Displaying content of log.rtcm.json.test for verification ---"
           cat log.rtcm.json.test || echo "Warning: log.rtcm.json.test could not be read or is empty."
@@ -75,7 +74,7 @@ jobs:
           if [ ! -s "$INPUT_FILE" ]; then
             echo "Log file '$INPUT_FILE' is empty or not found. Skipping analysis."
             echo "Analysis failed: Log file '$INPUT_FILE' is empty or missing." > $OUTPUT_FILE
-            exit 0 # Exit successfully so the artifact still uploads
+            exit 0
           fi
 
           NOW_SECONDS=$(date -u +%s)
@@ -87,16 +86,17 @@ jobs:
           echo "" >> $OUTPUT_FILE
 
           FOUND_COUNT=0
-          # FIX: Added 'and .sbp.expiration != null' to ensure we only process messages with an expiration date.
           jq -c '. | select(.sbp.msg_type == 3081 and .sbp.expiration != null)' "$INPUT_FILE" | while read -r line; do
             ((FOUND_COUNT++))
             
-            YEAR=$(echo "$line" | jq '.sbp.expiration.year')
-            MONTH=$(echo "$line" | jq '.sbp.expiration.month')
-            DAY=$(echo "$line" | jq '.sbp.expiration.day')
-            HOURS=$(echo "$line" | jq '.sbp.expiration.hours')
-            MINUTES=$(echo "$line" | jq '.sbp.expiration.minutes')
-            SECONDS=$(echo "$line" | jq '.sbp.expiration.seconds')
+            # FIX: Use a single, more robust jq command to extract all date parts at once.
+            read -r YEAR MONTH DAY HOURS MINUTES SECONDS < <(echo "$line" | jq -r '[.sbp.expiration.year, .sbp.expiration.month, .sbp.expiration.day, .sbp.expiration.hours, .sbp.expiration.minutes, .sbp.expiration.seconds] | @tsv')
+            
+            # Check if any of the date parts are empty, which would indicate a parsing issue
+            if [ -z "$YEAR" ] || [ -z "$MONTH" ] || [ -z "$DAY" ]; then
+              echo "Skipping malformed message: $line"
+              continue
+            fi
             
             EXP_DATE_STRING="$YEAR-$MONTH-$DAY $HOURS:$MINUTES:$SECONDS"
             EXP_SECONDS=$(date -u -d "$EXP_DATE_STRING" +%s)
@@ -132,6 +132,8 @@ jobs:
           path: |
             log.rtcm.json.test
             expiration_analysis.txt
+
+
 
 
 

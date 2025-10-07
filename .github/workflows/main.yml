@@ -10,12 +10,9 @@ jobs:
   validation-job:
     runs-on: ubuntu-latest
     env:
-      # --- YOU MUST REPLACE THESE TWO VALUES ---
-      # Ensure this URL points to the 'x86_64' file in your GitHub Release
+      # These are the values you provided
       SWIFT_TOOLS_URL: "https://github.com/shahrzadshariati/Expiration-Date-Validator/releases/download/v1.0.0-tools/swift-cli-v0.20.0-x86_64-unknown-linux-musl.tar.gz"
-      # The file size you provided
       EXPECTED_FILE_SIZE: 44397837
-      # ---
 
     steps:
       - name: Check out repository
@@ -38,7 +35,7 @@ jobs:
           echo "$HOME/swift-tools" >> $GITHUB_PATH
           echo "Tools are ready."
 
-     - name: Run Stream and Analyze Certificate
+      - name: Run Stream and Analyze Certificate
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
           NTRIP_USERNAME: ${{ secrets.NTRIP_USERNAME }}
@@ -55,40 +52,8 @@ jobs:
           echo "### Data stream finished. ###"
 
           # --- PART 2: Analyze the certificate from the log file ---
-          echo "" # Add a blank line for readability
+          echo ""
           echo "--- Starting Certificate Analysis ---"
           
           INPUT_FILE="log.rtcm.json"
-          STATUS_FILE="expiration_status.txt"
-
-          if [ ! -s "$INPUT_FILE" ]; then
-            echo "Input file '$INPUT_FILE' not found or is empty. Skipping analysis."
-            echo -e "Status: Analysis Skipped\nReason: Input file was missing or empty." > $STATUS_FILE
-            exit 0
-          fi
-
-          EXP_DATE_STRING=$(jq -r 'select(.msg_type == 3081) | .expiration | "\(.year)-\(.month)-\(.day) \(.hours):\(.minutes):\(.seconds)"' $INPUT_FILE | head -n 1)
-
-          if [ -z "$EXP_DATE_STRING" ]; then
-            echo "Message type 3081 not found. Cannot check expiration."
-            echo -e "Status: Analysis Failed\nReason: Message type 3081 not found in log." > $STATUS_FILE
-          else
-            EXP_TIMESTAMP=$(date -d "$EXP_DATE_STRING UTC" +%s)
-            NOW_TIMESTAMP=$(date +%s)
-            
-            if (( EXP_TIMESTAMP < NOW_TIMESTAMP )); then
-              echo -e "Status: EXPIRED\nExpiration Date: $EXP_DATE_STRING UTC" > $STATUS_FILE
-            else
-              DAYS_REMAINING=$(( (EXP_TIMESTAMP - NOW_TIMESTAMP) / 86400 ))
-              if (( DAYS_REMAINING < 30 )); then
-                echo -e "Status: OK (Expiring Soon)\nDays Remaining: $DAYS_REMAINING\nExpiration Date: $EXP_DATE_STRING UTC" > $STATUS_FILE
-              else
-                echo -e "Status: OK\nDays Remaining: $DAYS_REMAINING\nExpiration Date: $EXP_DATE_STRING UTC" > $STATUS_FILE
-              fi
-            fi
-          fi
-          
-          # This is the final report that will be easy to find in the log
-          echo "" # Add a blank line for readability
-          echo "--- Generated Status Report ---"
-          cat $STATUS_FILE
+          STATUS_FILE="expiration_status.txt

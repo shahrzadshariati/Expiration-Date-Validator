@@ -72,17 +72,14 @@ jobs:
           
           echo "### Starting JSON analysis using shell script... ###"
 
-          # Check if the input file has content
           if [ ! -s "$INPUT_FILE" ]; then
             echo "Analysis failed: Log file '$INPUT_FILE' is empty or not found." > $OUTPUT_FILE
-            exit 0 # Exit gracefully
+            exit 0
           fi
 
-          # Get the current time in UTC
           NOW_SECONDS=$(date -u +%s)
           NOW_READABLE=$(date -u)
 
-          # Prepare the output file header
           echo "--- Certificate Expiration Analysis ---" > $OUTPUT_FILE
           echo "Analysis performed at (UTC): $NOW_READABLE" >> $OUTPUT_FILE
           echo "========================================" >> $OUTPUT_FILE
@@ -90,26 +87,18 @@ jobs:
 
           FOUND_COUNT=0
           
-          # This improved jq command is more efficient and robust. It finds all relevant lines
-          # and extracts the necessary date parts in a single pass.
-          jq -r '
-            select(.sbp.msg_type == 3081 and .sbp.expiration != null) |
-            .sbp.expiration |
-            "\([.year]) \([.month]) \([.day]) \([.hours]) \([.minutes]) \([.seconds])"
-          ' "$INPUT_FILE" | while read -r YEAR MONTH DAY HOURS MINUTES SECONDS; do
+          # This jq command is correct.
+          # The change is below: We replace the pipe "|" with process substitution "< <(...)".
+          # This ensures the loop runs in the main script, so FOUND_COUNT is updated correctly.
+          while read -r YEAR MONTH DAY HOURS MINUTES SECONDS; do
             ((FOUND_COUNT++))
             
-            # Construct a date string that 'date' can understand
             EXP_DATE_STRING="$YEAR-$MONTH-$DAY $HOURS:$MINUTES:$SECONDS"
-            
-            # Convert the expiration date to seconds since epoch
             EXP_SECONDS=$(date -u -d "$EXP_DATE_STRING" +%s)
             
-            # Calculate the difference in seconds and convert to days
             DIFF_SECONDS=$((EXP_SECONDS - NOW_SECONDS))
             DAYS_REMAINING=$((DIFF_SECONDS / 86400))
             
-            # Write the required information to the output file
             echo "Found Certificate (Message 3081)" >> $OUTPUT_FILE
             echo "  1. Expiration Date (UTC): $EXP_DATE_STRING" >> $OUTPUT_FILE
             
@@ -119,7 +108,11 @@ jobs:
               echo "  - Status: EXPIRED ❌" >> $OUTPUT_FILE
             fi
             echo "" >> $OUTPUT_FILE
-          done
+          done < <(jq -r '
+            select(.sbp.msg_type == 3081 and .sbp.expiration != null) |
+            .sbp.expiration |
+            "\([.year]) \([.month]) \([.day]) \([.hours]) \([.minutes]) \([.seconds])"
+          ' "$INPUT_FILE")
           
           if [ "$FOUND_COUNT" -eq 0 ]; then
             echo "No valid messages with msg_type 3081 and an expiration date were found in the log." >> $OUTPUT_FILE

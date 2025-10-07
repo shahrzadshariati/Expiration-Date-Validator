@@ -4,129 +4,125 @@
 
 name: Test Swift Tools and NTRIP Stream
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+  push:
+  	branches:
+  	  - main
 
 jobs:
-  test-streaming-job:
-    runs-on: ubuntu-latest
-    env:
-      NTRIP_USERNAME: ${{ secrets.NTRIP_USERNAME }}
-      NTRIP_PASSWORD: ${{ secrets.NTRIP_PASSWORD }}
-      
-      # IMPORTANT: Make sure these two values are still correct!
-      SWIFT_TOOLS_URL: "https://github.com/shahrzadshariati/Convert-Stream-RTCM-to-JSON/releases/download/v1.0.0-tools/swift-cli-v0.20.0-x86_64-unknown-linux-musl.tar.gz"
-      EXPECTED_FILE_SIZE: 44397837 
+  test-streaming-job:
+  	runs-on: ubuntu-latest
+  	env:
+  	  NTRIP_USERNAME: ${{ secrets.NTRIP_USERNAME }}
+  	  NTRIP_PASSWORD: ${{ secrets.NTRIP_PASSWORD }}
+  	  
+  	  # IMPORTANT: Make sure these two values are still correct!
+  	  SWIFT_TOOLS_URL: "https://github.com/shahrzadshariati/Convert-Stream-RTCM-to-JSON/releases/download/v1.0.0-tools/swift-cli-v0.20.0-x86_64-unknown-linux-musl.tar.gz"
+  	  EXPECTED_FILE_SIZE: 44397837 
 
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+  	steps:
+  	  - name: Check out repository
+  		uses: actions/checkout@v4
 
-      - name: Setup Swift Tools
-        run: |
-          echo "### Downloading and installing Swift Tools... ###"
-          curl -L -o swift-tools.tar.gz "${{ env.SWIFT_TOOLS_URL }}"
-          
-          ACTUAL_SIZE=$(wc -c < swift-tools.tar.gz)
-          if [ "$ACTUAL_SIZE" -ne "${{ env.EXPECTED_FILE_SIZE }}" ]; then
-            echo "Error: Downloaded file size is incorrect. Expected ${{ env.EXPECTED_FILE_SIZE }}, got $ACTUAL_SIZE."
-            exit 1
-          fi
-          
-          mkdir -p $HOME/swift-tools
-          tar -xzf swift-tools.tar.gz -C $HOME/swift-tools
-          
-          echo "$HOME/swift-tools" >> $GITHUB_PATH
-          echo "Tools are ready."
+  	  - name: Setup Swift Tools
+  		run: |
+  		  echo "### Downloading and installing Swift Tools... ###"
+  		  curl -L -o swift-tools.tar.gz "${{ env.SWIFT_TOOLS_URL }}"
+  		  
+  		  ACTUAL_SIZE=$(wc -c < swift-tools.tar.gz)
+  		  if [ "$ACTUAL_SIZE" -ne "${{ env.EXPECTED_FILE_SIZE }}" ]; then
+  			echo "Error: Downloaded file size is incorrect. Expected ${{ env.EXPECTED_FILE_SIZE }}, got $ACTUAL_SIZE."
+  			exit 1
+  		  fi
+  		  
+  		  mkdir -p $HOME/swift-tools
+  		  tar -xzf swift-tools.tar.gz -C $HOME/swift-tools
+  		  
+  		  echo "$HOME/swift-tools" >> $GITHUB_PATH
+  		  echo "Tools are ready."
 
-      # --- THIS IS YOUR ORIGINAL, UNMODIFIED STREAMING STEP ---
-      - name: Run a 10-second Test Stream
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
-        run: |
-          echo "Attempting to connect, log in, and stream data..."
-          set -o pipefail
-          timeout 10s swift ntripping --verbose \
-            --username "${{ env.NTRIP_USERNAME }}" \
-            --password "${{ env.NTRIP_PASSWORD }}" \
-            --url https://eu.l1l2.skylark.swiftnav.com:2102/SSR-integrity \
-            --lat 52.149 \
-            --lon 13.096 | swift rtcm32json > log.rtcm.json.test
-        continue-on-error: true
+  	  - name: Run a 30-second Test Stream
+  		env:
+  		  GITHUB_TOKEN: ${{ secrets.PAT }}
+  		run: |
+  		  echo "Attempting to connect, log in, and stream data..."
+  		  set -o pipefail
+  		  # Increased timeout for reliability
+  		  timeout 30s swift ntripping --verbose \
+  			--username "${{ env.NTRIP_USERNAME }}" \
+  			--password "${{ env.NTRIP_PASSWORD }}" \
+  			--url https://eu.l1l2.skylark.swiftnav.com:2102/SSR-integrity \
+  			--lat 52.149 \
+  			--lon 13.096 | swift rtcm32json > log.rtcm.json.test
+        # The "continue-on-error: true" line has been REMOVED. This is the fix.
 
-      # --- STEP TO DISPLAY THE FILE CONTENT ---
-      - name: Display Raw Log Content
-        if: always()
-        run: |
-          echo "--- Displaying content of log.rtcm.json.test for verification ---"
-          cat log.rtcm.json.test || echo "Warning: log.rtcm.json.test could not be read or is empty."
-          echo "--- End of log.rtcm.json.test content ---"
+  	  - name: Display Raw Log Content
+  		if: always()
+  		run: |
+  		  echo "--- Displaying content of log.rtcm.json.test for verification ---"
+  		  cat log.rtcm.json.test || echo "Warning: log.rtcm.json.test could not be read or is empty."
+  		  echo "--- End of log.rtcm.json.test content ---"
 
-      # --- ROBUST ANALYSIS STEP ---
-      - name: Analyze Expiration Dates
-        run: |
-          INPUT_FILE="log.rtcm.json.test"
-          OUTPUT_FILE="expiration_analysis.txt"
-          
-          echo "### Starting JSON analysis using shell script... ###"
+  	  # --- ROBUST ANALYSIS STEP ---
+  	  - name: Analyze Expiration Dates
+  		run: |
+  		  INPUT_FILE="log.rtcm.json.test"
+  		  OUTPUT_FILE="expiration_analysis.txt"
+  		  
+  		  echo "### Starting JSON analysis using shell script... ###"
 
-          if [ ! -s "$INPUT_FILE" ]; then
-            echo "Analysis failed: Log file '$INPUT_FILE' is empty or not found." > $OUTPUT_FILE
-            exit 0
-          fi
+  		  if [ ! -s "$INPUT_FILE" ]; then
+  			echo "Analysis failed: Log file '$INPUT_FILE' is empty or not found." > $OUTPUT_FILE
+  			exit 0
+  		  fi
 
-          NOW_SECONDS=$(date -u +%s)
-          NOW_READABLE=$(date -u)
+  		  NOW_SECONDS=$(date -u +%s)
+  		  NOW_READABLE=$(date -u)
 
-          echo "--- Certificate Expiration Analysis ---" > $OUTPUT_FILE
-          echo "Analysis performed at (UTC): $NOW_READABLE" >> $OUTPUT_FILE
-          echo "========================================" >> $OUTPUT_FILE
-          echo "" >> $OUTPUT_FILE
+  		  echo "--- Certificate Expiration Analysis ---" > $OUTPUT_FILE
+  		  echo "Analysis performed at (UTC): $NOW_READABLE" >> $OUTPUT_FILE
+  		  echo "========================================" >> $OUTPUT_FILE
+  		  echo "" >> $OUTPUT_FILE
 
-          FOUND_COUNT=0
-          
-          # This jq command is correct.
-          # The change is below: We replace the pipe "|" with process substitution "< <(...)".
-          # This ensures the loop runs in the main script, so FOUND_COUNT is updated correctly.
-          while read -r YEAR MONTH DAY HOURS MINUTES SECONDS; do
-            ((FOUND_COUNT++))
-            
-            EXP_DATE_STRING="$YEAR-$MONTH-$DAY $HOURS:$MINUTES:$SECONDS"
-            EXP_SECONDS=$(date -u -d "$EXP_DATE_STRING" +%s)
-            
-            DIFF_SECONDS=$((EXP_SECONDS - NOW_SECONDS))
-            DAYS_REMAINING=$((DIFF_SECONDS / 86400))
-            
-            echo "Found Certificate (Message 3081)" >> $OUTPUT_FILE
-            echo "  1. Expiration Date (UTC): $EXP_DATE_STRING" >> $OUTPUT_FILE
-            
-            if [ "$DAYS_REMAINING" -ge 0 ]; then
-              echo "  2. Days Remaining: $DAYS_REMAINING" >> $OUTPUT_FILE
-            else
-              echo "  - Status: EXPIRED ❌" >> $OUTPUT_FILE
-            fi
-            echo "" >> $OUTPUT_FILE
-          done < <(jq -r '
-            select(.sbp.msg_type == 3081 and .sbp.expiration != null) |
-            .sbp.expiration |
-            "\([.year]) \([.month]) \([.day]) \([.hours]) \([.minutes]) \([.seconds])"
-          ' "$INPUT_FILE")
-          
-          if [ "$FOUND_COUNT" -eq 0 ]; then
-            echo "No valid messages with msg_type 3081 and an expiration date were found in the log." >> $OUTPUT_FILE
-          fi
-          
-          echo "### Analysis complete. Found $FOUND_COUNT relevant messages. ###"
+  		  FOUND_COUNT=0
+  		  
+  		  # Using process substitution to correctly update FOUND_COUNT
+  		  while read -r YEAR MONTH DAY HOURS MINUTES SECONDS; do
+  			((FOUND_COUNT++))
+  			
+  			EXP_DATE_STRING="$YEAR-$MONTH-$DAY $HOURS:$MINUTES:$SECONDS"
+  			EXP_SECONDS=$(date -u -d "$EXP_DATE_STRING" +%s)
+  			
+  			DIFF_SECONDS=$((EXP_SECONDS - NOW_SECONDS))
+  			DAYS_REMAINING=$((DIFF_SECONDS / 86400))
+  			
+  			echo "Found Certificate (Message 3081)" >> $OUTPUT_FILE
+  			echo "  1. Expiration Date (UTC): $EXP_DATE_STRING" >> $OUTPUT_FILE
+  			
+  			if [ "$DAYS_REMAINING" -ge 0 ]; then
+  			  echo "  2. Days Remaining: $DAYS_REMAINING" >> $OUTPUT_FILE
+  			else
+  			  echo "  - Status: EXPIRED ❌" >> $OUTPUT_FILE
+  			fi
+  			echo "" >> $OUTPUT_FILE
+  		  done < <(jq -r '
+  			select(.sbp.msg_type == 3081 and .sbp.expiration != null) |
+  			.sbp.expiration |
+  			"\([.year]) \([.month]) \([.day]) \([.hours]) \([.minutes]) \([.seconds])"
+  		  ' "$INPUT_FILE")
+  		  
+  		  if [ "$FOUND_COUNT" -eq 0 ]; then
+  			echo "No valid messages with msg_type 3081 and an expiration date were found in the log." >> $OUTPUT_FILE
+  		  fi
+  		  
+  		  echo "### Analysis complete. Found $FOUND_COUNT relevant messages. ###"
 
-      # --- Upload Artifacts ---
-      - name: Upload Logs and Analysis Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ntrip-logs-and-analysis
-          path: |
-            log.rtcm.json.test
-            expiration_analysis.txt
-
+  	  # --- Upload Artifacts ---
+  	  - name: Upload Logs and Analysis Report
+  		if: always()
+  		uses: actions/upload-artifact@v4
+  		with:
+  		  name: ntrip-logs-and-analysis
+  		  path: |
+  			log.rtcm.json.test
+  			expiration_analysis.txt

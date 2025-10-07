@@ -40,11 +40,15 @@ jobs:
 
       - name: Run NTRIP Stream and Create Log
         env:
-          # Use the PAT secret for authentication with private dependencies
           GITHUB_TOKEN: ${{ secrets.PAT }}
-          # These secrets are for the NTRIP login
           NTRIP_USERNAME: ${{ secrets.NTRIP_USERNAME }}
           NTRIP_PASSWORD: ${{ secrets.NTRIP_PASSWORD }}
         run: |
           echo "### Starting 10-second data stream... ###"
-          timeout 10
+          # Corrected 'rtcm3json' to 'rtcm32json'
+          timeout 10s swift ntripping --verbose \
+            --username "${{ env.NTRIP_USERNAME }}" \
+            --password "${{ env.NTRIP_PASSWORD }}" \
+            --url https://eu.l1l2.skylark.swiftnav.com:2102/SSR-integrity \
+            --lat 52.149 \
+            --lon 13.096 | swift rtcm32json > log.rtcm.json

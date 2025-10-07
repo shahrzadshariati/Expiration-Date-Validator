@@ -1,5 +1,6 @@
 # This workflow uses the user's original, working steps for setup and streaming,
-# and appends a new step to analyze the JSON output.
+# and appends a new step to analyze the JSON output. This is the version that
+# successfully streamed data before introducing more complex parsing logic.
 
 name: Test Swift Tools and NTRIP Stream
 on:
@@ -87,17 +88,18 @@ jobs:
 
           FOUND_COUNT=0
           
-          # FIX: Use 'sed' to format the stream on the fly by inserting a newline
-          # between JSON objects. This correctly prepares the data for jq.
-          sed 's/}{/}\n{/g' "$INPUT_FILE" | jq -c '. | select(.sbp.msg_type == 3081 and .sbp.expiration != null)' | while read -r line; do
+          # This version uses a simpler jq filter that was failing due to JSON formatting,
+          # but the step itself was reached successfully.
+          jq -c '. | select(.sbp.msg_type == 3081 and .sbp.expiration != null)' "$INPUT_FILE" | while read -r line; do
             ((FOUND_COUNT++))
             
-            read -r YEAR MONTH DAY HOURS MINUTES SECONDS < <(echo "$line" | jq -r '[.sbp.expiration.year, .sbp.expiration.month, .sbp.expiration.day, .sbp.expiration.hours, .sbp.expiration.minutes, .sbp.expiration.seconds] | @tsv')
-            
-            if [ -z "$YEAR" ] || [ -z "$MONTH" ] || [ -z "$DAY" ]; then
-              echo "Skipping malformed message: $line"
-              continue
-            fi
+            # This method of extracting date parts was fragile.
+            YEAR=$(echo "$line" | jq '.sbp.expiration.year')
+            MONTH=$(echo "$line" | jq '.sbp.expiration.month')
+            DAY=$(echo "$line" | jq '.sbp.expiration.day')
+            HOURS=$(echo "$line" | jq '.sbp.expiration.hours')
+            MINUTES=$(echo "$line" | jq '.sbp.expiration.minutes')
+            SECONDS=$(echo "$line" | jq '.sbp.expiration.seconds')
             
             EXP_DATE_STRING="$YEAR-$MONTH-$DAY $HOURS:$MINUTES:$SECONDS"
             EXP_SECONDS=$(date -u -d "$EXP_DATE_STRING" +%s)

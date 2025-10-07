@@ -1,0 +1,83 @@
+name: Test Swift Tools and NTRIP Stream
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  test-streaming-job:
+    runs-on: ubuntu-latest
+    env:
+      NTRIP_USERNAME: ${{ secrets.NTRIP_USERNAME }}
+      NTRIP_PASSWORD: ${{ secrets.NTRIP_PASSWORD }}
+      
+      # IMPORTANT: Make sure these two values are still correct!
+      SWIFT_TOOLS_URL: "https://github.com/shahrzadshariati/Convert-Stream-RTCM-to-JSON/releases/download/v1.0.0-tools/swift-cli-v0.20.0-x86_64-unknown-linux-musl.tar.gz"
+      EXPECTED_FILE_SIZE: 44397837 
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Swift Tools
+        run: |
+          echo "### Downloading and installing Swift Tools... ###"
+          curl -L -o swift-tools.tar.gz "${{ env.SWIFT_TOOLS_URL }}"
+          
+          ACTUAL_SIZE=$(wc -c < swift-tools.tar.gz)
+          if [ "$ACTUAL_SIZE" -ne "${{ env.EXPECTED_FILE_SIZE }}" ]; then
+            echo "Error: Downloaded file size is incorrect. Expected ${{ env.EXPECTED_FILE_SIZE }}, got $ACTUAL_SIZE."
+            exit 1
+          fi
+          
+          mkdir -p $HOME/swift-tools
+          tar -xzf swift-tools.tar.gz -C $HOME/swift-tools
+          
+          echo "$HOME/swift-tools" >> $GITHUB_PATH
+          echo "Tools are ready."
+
+      - name: Run a 10-second Test Stream with Debugging
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        run: |
+          echo "[1/4] Starting debug checks..."
+          set -o pipefail
+
+          echo "[2/4] Verifying we can write to the output file..."
+          touch log.rtcm.json.test
+          if [ $? -ne 0 ]; then
+            echo "Error: Could not create the output file. Check directory permissions."
+            exit 1
+          fi
+          echo "Success: Output file 'log.rtcm.json.test' is writeable."
+          ls -l log.rtcm.json.test
+
+          echo "[3/4] Verifying the 'rtcm32json' tool is functional..."
+          swift rtcm32json --help > /dev/null 2>&1
+          if [ $? -ne 0 ]; then
+            echo "Error: The 'swift rtcm32json' command failed to respond."
+            exit 1
+          fi
+          echo "Success: 'swift rtcm32json' tool appears to be working."
+
+          echo "[4/4] Attempting to connect, log in, and stream data..."
+          # FIX 1: Changed -vv to the correct --verbose flag
+          timeout 10s swift ntripping --verbose \
+            --username "${{ env.NTRIP_USERNAME }}" \
+            --password "${{ env.NTRIP_PASSWORD }}" \
+            --url https://eu.l1l2.skylark.swiftnav.com:2102/SSR-integrity \
+            --lat 52.149 \
+            --lon 13.096 | swift rtcm32json > log.rtcm.json.test
+        # FIX 2: Corrected the indentation of this line
+        continue-on-error: true
+
+        
+          
+
+      - name: Upload Test Log File
+        uses: actions/upload-artifact@v4
+        with:
+          name: ntrip-test-log
+          path: log.rtcm.json.test

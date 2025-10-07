@@ -67,13 +67,18 @@ jobs:
       - name: Analyze Expiration Dates
         run: |
           INPUT_FILE="log.rtcm.json.test"
+          CLEAN_INPUT_FILE="log.rtcm.json.clean" # Use a temporary clean file
           OUTPUT_FILE="expiration_analysis.txt"
           
           echo "### Starting JSON analysis using shell script... ###"
 
-          if [ ! -s "$INPUT_FILE" ]; then
-            echo "Log file '$INPUT_FILE' is empty or not found. Skipping analysis."
-            echo "Analysis failed: Log file '$INPUT_FILE' is empty or missing." > $OUTPUT_FILE
+          # FIX: Pre-process the raw log to extract only valid-looking JSON objects.
+          # This handles cases where lines are malformed or contain non-JSON text.
+          grep -o '{.*}' "$INPUT_FILE" > "$CLEAN_INPUT_FILE"
+
+          if [ ! -s "$CLEAN_INPUT_FILE" ]; then
+            echo "Log file did not contain any valid JSON objects. Skipping analysis."
+            echo "Analysis failed: No JSON found in '$INPUT_FILE'." > $OUTPUT_FILE
             exit 0
           fi
 
@@ -86,13 +91,12 @@ jobs:
           echo "" >> $OUTPUT_FILE
 
           FOUND_COUNT=0
-          jq -c '. | select(.sbp.msg_type == 3081 and .sbp.expiration != null)' "$INPUT_FILE" | while read -r line; do
+          # Run the analysis on the CLEAN file now
+          jq -c '. | select(.sbp.msg_type == 3081 and .sbp.expiration != null)' "$CLEAN_INPUT_FILE" | while read -r line; do
             ((FOUND_COUNT++))
             
-            # FIX: Use a single, more robust jq command to extract all date parts at once.
             read -r YEAR MONTH DAY HOURS MINUTES SECONDS < <(echo "$line" | jq -r '[.sbp.expiration.year, .sbp.expiration.month, .sbp.expiration.day, .sbp.expiration.hours, .sbp.expiration.minutes, .sbp.expiration.seconds] | @tsv')
             
-            # Check if any of the date parts are empty, which would indicate a parsing issue
             if [ -z "$YEAR" ] || [ -z "$MONTH" ] || [ -z "$DAY" ]; then
               echo "Skipping malformed message: $line"
               continue
@@ -132,8 +136,6 @@ jobs:
           path: |
             log.rtcm.json.test
             expiration_analysis.txt
-
-
 
 
 
